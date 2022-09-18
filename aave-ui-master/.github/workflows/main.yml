@@ -1,0 +1,68 @@
+name: CI
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+on:
+  pull_request:
+
+jobs:
+  deploy_ipfs:
+    runs-on: ubuntu-latest
+    outputs:
+      uri: ${{ steps.pinata.outputs.uri }}
+    steps:
+      - uses: actions/checkout@v2
+
+      - uses: actions/setup-node@v2
+        with:
+          node-version: '14'
+          cache: 'npm'
+
+      - name: install
+        run: npm ci
+
+      - name: prepare env
+        run: cp ${ENV:-'.github/.env.preview'} .env
+
+      - name: build
+        run: npm run build
+
+      - name: pinata
+        id: pinata
+        env:
+          PINATA_API_KEY: ${{ secrets.PINATA_API_KEY }}
+          PINATA_SECRET_KEY: ${{ secrets.PINATA_SECRET_KEY }}
+          PIN_ALIAS: "${{ format('pull_request_{0}', github.head_ref) }}"
+        run: node scripts/pin-pinata.js
+
+      - uses: actions/github-script@v5
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.payload.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: 'Preview link: ${{steps.pinata.outputs.uri}}'
+            })
+
+  test:
+    runs-on: ubuntu-latest
+    needs: deploy_ipfs
+    container: 'wolphin/e2e-image'
+    env:
+      DOMAIN: '${{ needs.deploy_ipfs.outputs.uri }}'
+      LAMBDATEST_ACCOUNT: ${{ secrets.LAMBDATEST_ACCOUNT }}
+      LAMBDATEST_KEY: ${{ secrets.LAMBDATEST_KEY }}
+      TENDERLY_ACCOUNT: ${{ secrets.TENDERLY_ACCOUNT }}
+      TENDERLY_KEY: ${{ secrets.TENDERLY_KEY }}
+      TENDERLY_PROJECT: ${{ secrets.TENDERLY_PROJECT }}
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: install
+        run: cd tests && npm ci
+
+      - name: Main
+        run: cd tests && BUILD="${GITHUB_REF}_${GITHUB_SHA}" npm run lambdaTest
