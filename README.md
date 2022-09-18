@@ -1,2 +1,2 @@
-# blockchain_webapps_sites
+# blockchain_webapps
 Websites or Apps Built with Web3 Technologies
